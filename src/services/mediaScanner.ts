@@ -17,6 +17,7 @@ interface RawAudioFile {
 
 interface LocalAudioModuleType {
   getAllAudioFiles: () => Promise<RawAudioFile[]>;
+  deleteAudioFile?: (id: string) => Promise<boolean>;
 }
 
 const getAudioPermission = (): Permission => {
@@ -157,4 +158,23 @@ export async function scanLocalAudioFiles(): Promise<Track[]> {
   }
 
   return normalized;
+}
+
+export async function deleteLocalAudioFile(id: string): Promise<boolean> {
+  if (Platform.OS !== 'android') {
+    return false;
+  }
+
+  const module = NativeModules.LocalAudioModule as
+    | LocalAudioModuleType
+    | undefined;
+  if (!module || typeof module.deleteAudioFile !== 'function') {
+    return false;
+  }
+
+  try {
+    return await module.deleteAudioFile(id);
+  } catch {
+    return false;
+  }
 }

@@ -1,9 +1,15 @@
 package com.audioplayerapp
 
+import android.app.Activity
+import android.app.RecoverableSecurityException
 import android.content.ContentUris
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import com.facebook.react.bridge.ActivityEventListener
 import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.BaseActivityEventListener
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -12,7 +18,7 @@ import java.io.File
 import java.util.concurrent.Executors
 
 /**
- * Native module that scans local device audio files via Android MediaStore.
+ * Native module that scans and deletes local device audio files via Android MediaStore.
  *
  * Returns an array of track objects with:
  * - id: String
@@ -30,8 +36,128 @@ class LocalAudioModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
 
     private val executor = Executors.newSingleThreadExecutor()
+    private var pendingDeletePromise: Promise? = null
+    private var pendingDeleteUri: Uri? = null
+
+    private val activityEventListener: ActivityEventListener =
+        object : BaseActivityEventListener() {
+            override fun onActivityResult(
+                activity: Activity,
+                requestCode: Int,
+                resultCode: Int,
+                data: Intent?,
+            ) {
+                if (requestCode != DELETE_REQUEST_CODE) {
+                    return
+                }
+                val promise = pendingDeletePromise ?: return
+                val targetUri = pendingDeleteUri
+                pendingDeletePromise = null
+                pendingDeleteUri = null
+
+                if (resultCode != Activity.RESULT_OK) {
+                    promise.resolve(false)
+                    return
+                }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    promise.resolve(true)
+                } else if (targetUri != null) {
+                    executor.execute {
+                        try {
+                            val deleted = reactApplicationContext.contentResolver.delete(targetUri, null, null)
+                            promise.resolve(deleted > 0)
+                        } catch (_: Exception) {
+                            promise.resolve(false)
+                        }
+                    }
+                } else {
+                    promise.resolve(false)
+                }
+            }
+        }
+
+    init {
+        reactContext.addActivityEventListener(activityEventListener)
+    }
 
     override fun getName(): String = "LocalAudioModule"
+
+    @ReactMethod
+    fun deleteAudioFile(id: String, promise: Promise) {
+        executor.execute {
+            try {
+                val numericId = id.toLongOrNull()
+                if (numericId == null) {
+                    promise.resolve(false)
+                    return@execute
+                }
+                val uri = ContentUris.withAppendedId(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    numericId,
+                )
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val activity = reactApplicationContext.currentActivity
+                    if (activity == null) {
+                        promise.resolve(false)
+                        return@execute
+                    }
+                    val pendingIntent = MediaStore.createDeleteRequest(
+                        reactApplicationContext.contentResolver,
+                        listOf(uri),
+                    )
+                    pendingDeletePromise?.resolve(false)
+                    pendingDeletePromise = promise
+                    pendingDeleteUri = uri
+                    activity.startIntentSenderForResult(
+                        pendingIntent.intentSender,
+                        DELETE_REQUEST_CODE,
+                        null,
+                        0,
+                        0,
+                        0,
+                    )
+                } else {
+                    try {
+                        val deleted = reactApplicationContext.contentResolver.delete(uri, null, null)
+                        promise.resolve(deleted > 0)
+                    } catch (securityException: SecurityException) {
+                        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q &&
+                            securityException is RecoverableSecurityException
+                        ) {
+                            val activity = reactApplicationContext.currentActivity
+                            if (activity == null) {
+                                promise.resolve(false)
+                                return@execute
+                            }
+                            pendingDeletePromise?.resolve(false)
+                            pendingDeletePromise = promise
+                            pendingDeleteUri = uri
+                            activity.startIntentSenderForResult(
+                                securityException.userAction.actionIntent.intentSender,
+                                DELETE_REQUEST_CODE,
+                                null,
+                                0,
+                                0,
+                                0,
+                            )
+                        } else {
+                            promise.resolve(false)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                pendingDeletePromise = null
+                pendingDeleteUri = null
+                promise.reject("DELETE_AUDIO_ERROR", e.message ?: "Failed to delete audio file", e)
+            }
+        }
+    }
+
+    companion object {
+        private const val DELETE_REQUEST_CODE = 4201
+    }
 
     @ReactMethod
     fun getAllAudioFiles(promise: Promise) {

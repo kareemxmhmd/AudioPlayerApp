@@ -20,6 +20,7 @@ import { FloatingControlPill } from '../components/FloatingControlPill';
 import { RootStackParamList } from '../components/navigationTypes';
 import { PlaylistModal } from '../components/PlaylistModal';
 import { TrackItem } from '../components/TrackItem';
+import { TrackOptionsModal } from '../components/TrackOptionsModal';
 import { useMusic } from '../context/MusicContext';
 import { COLORS, RADIUS, SPACING } from '../theme/colors';
 import { Playlist, SortType, Track } from '../types/audio';
@@ -43,7 +44,6 @@ export function MyMusicScreen() {
     filteredTracks,
     playlists,
     currentTrack,
-    isPlaying,
     activeTab,
     setActiveTab,
     selectedPlaylistId,
@@ -56,7 +56,7 @@ export function MyMusicScreen() {
     hasPermission,
     rescanMedia,
     playTrack,
-    togglePlayPause,
+    deleteTrack,
     removeTrackFromPlaylist,
     deletePlaylist,
   } = useMusic();
@@ -65,6 +65,7 @@ export function MyMusicScreen() {
   const [isMenuVisible, setIsMenuVisible] = useState(false);
   const [playlistModalVisible, setPlaylistModalVisible] = useState(false);
   const [targetTrackId, setTargetTrackId] = useState<string | null>(null);
+  const [optionsTrack, setOptionsTrack] = useState<Track | null>(null);
 
   const selectedPlaylist = useMemo(
     () => playlists.find(p => p.id === selectedPlaylistId) ?? null,
@@ -81,20 +82,8 @@ export function MyMusicScreen() {
   };
 
   const handleTrackPress = async (track: Track) => {
-    if (currentTrack?.id !== track.id) {
-      await Promise.resolve(playTrack(track, filteredTracks));
-    } else if (!isPlaying) {
-      await Promise.resolve(togglePlayPause());
-    }
+    await Promise.resolve(playTrack(track, filteredTracks));
     navigation.navigate('NowPlaying');
-  };
-
-  const handleTrackTogglePlay = (track: Track) => {
-    if (currentTrack?.id === track.id) {
-      togglePlayPause();
-    } else {
-      playTrack(track, filteredTracks);
-    }
   };
 
   const handleOpenPlaylistForTrack = (track: Track) => {
@@ -113,16 +102,8 @@ export function MyMusicScreen() {
       <TrackItem
         track={item}
         isActive={isActive}
-        isPlaying={isActive && isPlaying}
         onPress={handleTrackPress}
-        onTogglePlay={handleTrackTogglePlay}
-        onMorePress={track => {
-          if (selectedPlaylist) {
-            removeTrackFromPlaylist(selectedPlaylist.id, track.id);
-          } else {
-            handleOpenPlaylistForTrack(track);
-          }
-        }}
+        onMorePress={track => setOptionsTrack(track)}
       />
     );
   };
@@ -305,8 +286,6 @@ export function MyMusicScreen() {
           />
         </TouchableOpacity>
 
-        <Text style={styles.headerTitle}>موسيقاي</Text>
-
         <TouchableOpacity
           activeOpacity={0.8}
           onPress={() => setIsMenuVisible(true)}
@@ -453,6 +432,20 @@ export function MyMusicScreen() {
         onClose={() => setPlaylistModalVisible(false)}
         trackId={targetTrackId}
       />
+
+      <TrackOptionsModal
+        visible={optionsTrack !== null}
+        track={optionsTrack}
+        playlistName={selectedPlaylist?.name ?? null}
+        onClose={() => setOptionsTrack(null)}
+        onAddToPlaylist={handleOpenPlaylistForTrack}
+        onRemoveFromPlaylist={
+          selectedPlaylist
+            ? track => removeTrackFromPlaylist(selectedPlaylist.id, track.id)
+            : undefined
+        }
+        onDeleteTrack={track => deleteTrack(track.id)}
+      />
     </View>
   );
 }
@@ -504,7 +497,7 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingTop: SPACING.xs,
-    paddingBottom: 112,
+    paddingBottom: 128,
   },
   centerState: {
     flex: 1,

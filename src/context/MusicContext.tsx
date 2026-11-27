@@ -16,6 +16,7 @@ import TrackPlayer, {
 } from 'react-native-track-player';
 import type { Track as RNTPTrack } from 'react-native-track-player';
 import {
+  deleteLocalAudioFile,
   requestAudioPermission,
   scanLocalAudioFiles,
 } from '../services/mediaScanner';
@@ -27,12 +28,20 @@ import {
 } from '../services/storageService';
 import {
   loadAndPlayQueue,
+  setPlayerRepeatMode,
   setupPlayer,
   skipNextInPlayer,
   skipPreviousInPlayer,
   syncUpcomingShuffle,
 } from '../services/trackPlayerService';
-import type { Playlist, SortType, TabType, Track } from '../types/audio';
+import type {
+  PlaybackMode,
+  Playlist,
+  RepeatModeType,
+  SortType,
+  TabType,
+  Track,
+} from '../types/audio';
 
 interface MusicContextValue {
   tracks: Track[];
@@ -44,6 +53,8 @@ interface MusicContextValue {
   position: number;
   duration: number;
   shuffle: boolean;
+  repeatMode: RepeatModeType;
+  playbackMode: PlaybackMode;
   activeTab: TabType;
   setActiveTab: (tab: TabType) => void;
   selectedPlaylistId: string | null;
@@ -61,7 +72,10 @@ interface MusicContextValue {
   skipToPrevious: () => Promise<void>;
   seekTo: (seconds: number) => Promise<void>;
   toggleShuffle: () => Promise<void>;
+  toggleRepeatMode: () => Promise<void>;
+  cyclePlaybackMode: () => Promise<void>;
   toggleLike: (trackId: string) => void;
+  deleteTrack: (trackId: string) => Promise<boolean>;
   createPlaylist: (name: string) => Playlist | null;
   addTrackToPlaylist: (playlistId: string, trackId: string) => void;
   removeTrackFromPlaylist: (playlistId: string, trackId: string) => void;
@@ -106,6 +120,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({
   const [likedIds, setLikedIds] = useState<string[]>([]);
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [shuffle, setShuffle] = useState<boolean>(false);
+  const [repeatMode, setRepeatMode] = useState<RepeatModeType>('off');
   const [activeTab, setActiveTabState] = useState<TabType>('all');
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(
     null,
@@ -153,32 +168,25 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({
     let mounted = true;
 
     const bootstrap = async () => {
-      const [storedLiked, storedPlaylists] = await Promise.all([
-        loadLikedIds(),
-        loadPlaylists(),
-        setupPlayer(),
-      ]);
-
-      if (!mounted) {
-        return;
-      }
-
-      setLikedIds(storedLiked);
-      setPlaylists(storedPlaylists);
-
       try {
-        const active = await TrackPlayer.getActiveTrack();
-        if (mounted && active) {
-          const mapped = mapRNTPTrackToTrack(active, tracksRef.current);
-          if (mapped) {
-            setCurrentTrack(mapped);
-          }
+        const [storedLiked, storedPlaylists] = await Promise.all([
+          loadLikedIds(),
+          loadPlaylists(),
+        ]);
+
+        if (!mounted) {
+          return;
         }
+
+        setLikedIds(storedLiked);
+        setPlaylists(storedPlaylists);
       } catch {
-        // Ignore if player has no active track yet
+        // Ignore storage load errors on startup
       }
 
-      await rescanMedia();
+      if (mounted) {
+        await rescanMedia();
+      }
     };
 
     bootstrap().catch(() => {});
@@ -277,11 +285,12 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({
 
       try {
         await loadAndPlayQueue(sourceQueue, track, shuffle);
+        await setPlayerRepeatMode(repeatMode);
       } catch {
         // Ignore transient native playback errors
       }
     },
-    [filteredTracks, shuffle, tracks],
+    [filteredTracks, repeatMode, shuffle, tracks],
   );
 
   const togglePlayPause = useCallback(async () => {
@@ -315,6 +324,10 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const skipToNext = useCallback(async () => {
     try {
+      const ready = await setupPlayer();
+      if (!ready) {
+        return;
+      }
       await skipNextInPlayer();
     } catch {
       // Ignore skip errors
@@ -323,6 +336,10 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const skipToPrevious = useCallback(async () => {
     try {
+      const ready = await setupPlayer();
+      if (!ready) {
+        return;
+      }
       await skipPreviousInPlayer();
     } catch {
       // Ignore skip errors
@@ -331,6 +348,10 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const seekTo = useCallback(async (seconds: number) => {
     try {
+      const ready = await setupPlayer();
+      if (!ready) {
+        return;
+      }
       const clamped = Math.max(0, seconds);
       await TrackPlayer.seekTo(clamped);
     } catch {
@@ -341,6 +362,10 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({
   const toggleShuffle = useCallback(async () => {
     const nextShuffle = !shuffle;
     setShuffle(nextShuffle);
+    if (nextShuffle && repeatMode === 'track') {
+      setRepeatMode('off');
+      setPlayerRepeatMode('off').catch(() => {});
+    }
     try {
       const sourceQueue =
         baseQueueRef.current.length > 0
@@ -356,7 +381,109 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({
     } catch {
       // Ignore queue sync errors
     }
-  }, [filteredTracks, shuffle, tracks]);
+  }, [filteredTracks, repeatMode, shuffle, tracks]);
+
+  const toggleRepeatMode = useCallback(async () => {
+    const nextMode: RepeatModeType = repeatMode === 'track' ? 'off' : 'track';
+    setRepeatMode(nextMode);
+    if (nextMode === 'track' && shuffle) {
+      setShuffle(false);
+    }
+    try {
+      await setPlayerRepeatMode(nextMode);
+    } catch {
+      // Ignore repeat mode errors
+    }
+  }, [repeatMode, shuffle]);
+
+  const playbackMode: PlaybackMode =
+    repeatMode === 'track'
+      ? 'repeat-one'
+      : shuffle
+        ? 'shuffle'
+        : 'sequential';
+
+  const cyclePlaybackMode = useCallback(async () => {
+    if (playbackMode === 'sequential') {
+      // sequential -> shuffle
+      setShuffle(true);
+      setRepeatMode('off');
+      try {
+        await setPlayerRepeatMode('off');
+        const sourceQueue =
+          baseQueueRef.current.length > 0
+            ? baseQueueRef.current
+            : filteredTracks.length > 0
+              ? filteredTracks
+              : tracks;
+        await syncUpcomingShuffle(sourceQueue, currentTrackRef.current, true);
+      } catch {
+        // Ignore
+      }
+    } else if (playbackMode === 'shuffle') {
+      // shuffle -> repeat-one
+      setShuffle(false);
+      setRepeatMode('track');
+      try {
+        await setPlayerRepeatMode('track');
+      } catch {
+        // Ignore
+      }
+    } else {
+      // repeat-one -> sequential
+      setShuffle(false);
+      setRepeatMode('off');
+      try {
+        await setPlayerRepeatMode('off');
+        const sourceQueue =
+          baseQueueRef.current.length > 0
+            ? baseQueueRef.current
+            : filteredTracks.length > 0
+              ? filteredTracks
+              : tracks;
+        await syncUpcomingShuffle(sourceQueue, currentTrackRef.current, false);
+      } catch {
+        // Ignore
+      }
+    }
+  }, [filteredTracks, playbackMode, tracks]);
+
+  const deleteTrack = useCallback(async (trackId: string): Promise<boolean> => {
+    const deleted = await deleteLocalAudioFile(trackId);
+    if (!deleted) {
+      return false;
+    }
+
+    setTracks(prev => prev.filter(item => item.id !== trackId));
+    baseQueueRef.current = baseQueueRef.current.filter(
+      item => item.id !== trackId,
+    );
+
+    setLikedIds(prev => {
+      if (!prev.includes(trackId)) {
+        return prev;
+      }
+      const next = prev.filter(id => id !== trackId);
+      saveLikedIds(next).catch(() => {});
+      return next;
+    });
+
+    setPlaylists(prev => {
+      const next = prev.map(playlist => ({
+        ...playlist,
+        trackIds: playlist.trackIds.filter(id => id !== trackId),
+      }));
+      savePlaylists(next).catch(() => {});
+      return next;
+    });
+
+    if (currentTrackRef.current?.id === trackId) {
+      setCurrentTrack(null);
+      TrackPlayer.reset().catch(() => {});
+    }
+
+    return true;
+  }, []);
 
   const toggleLike = useCallback((trackId: string) => {
     setLikedIds(prev => {
@@ -451,6 +578,8 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({
       position,
       duration,
       shuffle,
+      repeatMode,
+      playbackMode,
       activeTab,
       setActiveTab,
       selectedPlaylistId,
@@ -468,7 +597,10 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({
       skipToPrevious,
       seekTo,
       toggleShuffle,
+      toggleRepeatMode,
+      cyclePlaybackMode,
       toggleLike,
+      deleteTrack,
       createPlaylist,
       addTrackToPlaylist,
       removeTrackFromPlaylist,
@@ -479,7 +611,9 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({
       addTrackToPlaylist,
       createPlaylist,
       currentTrack,
+      cyclePlaybackMode,
       deletePlaylist,
+      deleteTrack,
       duration,
       filteredTracks,
       hasPermission,
@@ -487,9 +621,11 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({
       isPlaying,
       likedIds,
       playTrack,
+      playbackMode,
       playlists,
       position,
       removeTrackFromPlaylist,
+      repeatMode,
       rescanMedia,
       searchQuery,
       seekTo,
@@ -501,6 +637,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({
       sortBy,
       toggleLike,
       togglePlayPause,
+      toggleRepeatMode,
       toggleShuffle,
       tracks,
     ],

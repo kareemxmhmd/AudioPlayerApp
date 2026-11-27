@@ -68,6 +68,7 @@ jest.mock('react-native-track-player', () => {
     },
     RepeatMode: {
       Off: 0,
+      Track: 1,
     },
     State: {
       None: 'none',
@@ -159,7 +160,8 @@ jest.mock('@react-navigation/native-stack', () => {
 
 import TrackPlayer from 'react-native-track-player';
 import App from '../App';
-import { MusicProvider } from '../src/context/MusicContext';
+import { ErrorBoundary } from '../src/components/ErrorBoundary';
+import { MusicProvider, useMusic } from '../src/context/MusicContext';
 import { NowPlayingScreen } from '../src/screens/NowPlayingScreen';
 
 const SAMPLE_TRACK = {
@@ -217,9 +219,7 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-test('renders Arabic MyMusic screen, scanned track, search toggle, and FloatingControlPill', async () => {
-  (TrackPlayer.getActiveTrack as jest.Mock).mockResolvedValue(SAMPLE_TRACK);
-
+test('defers TrackPlayer setup on launch, scans tracks, toggles search, and shows FloatingControlPill on play', async () => {
   let tree: ReactTestRenderer.ReactTestRenderer | undefined;
 
   await ReactTestRenderer.act(async () => {
@@ -228,12 +228,32 @@ test('renders Arabic MyMusic screen, scanned track, search toggle, and FloatingC
     jest.runOnlyPendingTimers();
   });
 
+  expect(TrackPlayer.setupPlayer).not.toHaveBeenCalled();
+  expect(TrackPlayer.getActiveTrack).not.toHaveBeenCalled();
+
   const texts = collectText(tree!.root);
-  expect(texts).toContain('موسيقاي');
+  expect(texts).not.toContain('موسيقاي');
   expect(texts).toContain('الكل');
   expect(texts).toContain('قوائم التشغيل');
   expect(texts).toContain('المفضلة');
   expect(texts).toContain('أغنية تجريبية');
+
+  const trackRowTitle = tree!.root
+    .findAllByType(Text)
+    .find(node => node.props.children === 'أغنية تجريبية');
+  expect(trackRowTitle).toBeTruthy();
+
+  await ReactTestRenderer.act(async () => {
+    let parent = trackRowTitle!.parent;
+    while (parent && typeof parent.props.onPress !== 'function') {
+      parent = parent.parent;
+    }
+    parent!.props.onPress();
+    await flushMicrotasks();
+    jest.runOnlyPendingTimers();
+  });
+
+  expect(TrackPlayer.setupPlayer).toHaveBeenCalledTimes(1);
 
   const pill = tree!.root.findByProps({
     accessibilityLabel: 'فتح شاشة قيد التشغيل',
@@ -261,14 +281,20 @@ test('renders Arabic MyMusic screen, scanned track, search toggle, and FloatingC
 });
 
 test('renders NowPlaying without lyrics and opens PlaylistModal from playlist button', async () => {
-  (TrackPlayer.getActiveTrack as jest.Mock).mockResolvedValue(SAMPLE_TRACK);
+  function AutoPlayNowPlaying() {
+    const { playTrack } = useMusic();
+    React.useEffect(() => {
+      playTrack(SAMPLE_TRACK, [SAMPLE_TRACK]).catch(() => {});
+    }, [playTrack]);
+    return <NowPlayingScreen />;
+  }
 
   let tree: ReactTestRenderer.ReactTestRenderer | undefined;
 
   await ReactTestRenderer.act(async () => {
     tree = ReactTestRenderer.create(
       <MusicProvider>
-        <NowPlayingScreen />
+        <AutoPlayNowPlaying />
       </MusicProvider>,
     );
     await flushMicrotasks();
@@ -295,4 +321,50 @@ test('renders NowPlaying without lyrics and opens PlaylistModal from playlist bu
   await ReactTestRenderer.act(async () => {
     tree!.unmount();
   });
+});
+
+test('ErrorBoundary displays Arabic error fallback and retries cleanly', async () => {
+  const consoleErrorSpy = jest
+    .spyOn(console, 'error')
+    .mockImplementation(() => {});
+
+  let shouldThrow = true;
+  function MaybeThrowingChild() {
+    if (shouldThrow) {
+      throw new Error('Test render failure');
+    }
+    return <Text>تمت الاستعادة</Text>;
+  }
+
+  let tree: ReactTestRenderer.ReactTestRenderer | undefined;
+
+  await ReactTestRenderer.act(async () => {
+    tree = ReactTestRenderer.create(
+      <ErrorBoundary>
+        <MaybeThrowingChild />
+      </ErrorBoundary>,
+    );
+  });
+
+  const errorTexts = collectText(tree!.root);
+  expect(errorTexts).toContain('حدث خطأ غير متوقع');
+  expect(errorTexts).toContain('Test render failure');
+  expect(errorTexts).toContain('إعادة المحاولة');
+
+  shouldThrow = false;
+  const retryBtn = tree!.root.findByProps({
+    accessibilityLabel: 'إعادة المحاولة',
+  });
+
+  await ReactTestRenderer.act(async () => {
+    retryBtn.props.onPress();
+  });
+
+  const recoveredTexts = collectText(tree!.root);
+  expect(recoveredTexts).toContain('تمت الاستعادة');
+
+  await ReactTestRenderer.act(async () => {
+    tree!.unmount();
+  });
+  consoleErrorSpy.mockRestore();
 });

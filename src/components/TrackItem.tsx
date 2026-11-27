@@ -9,25 +9,20 @@ import { formatDuration } from './formatTime';
 interface TrackItemProps {
   track: Track;
   isActive: boolean;
-  isPlaying: boolean;
   onPress: (track: Track) => void;
-  onTogglePlay: (track: Track) => void;
   onMorePress?: (track: Track) => void;
 }
 
 /**
  * Single audio track row with artwork, title, artist/folder + duration subtitle,
- * playlist action button, and circular Play/Pause control.
+ * and a 3-dots options button (tapping the row plays the track).
  */
 export function TrackItem({
   track,
   isActive,
-  isPlaying,
   onPress,
-  onTogglePlay,
   onMorePress,
 }: TrackItemProps) {
-  const showPause = isActive && isPlaying;
   const secondaryLabel =
     track.artist && track.artist !== '<unknown>'
       ? track.artist
@@ -38,7 +33,7 @@ export function TrackItem({
       activeOpacity={0.75}
       onPress={() => onPress(track)}
       onLongPress={() => onMorePress?.(track)}
-      style={styles.row}
+      style={[styles.row, isActive ? styles.rowActive : null]}
     >
       <ArtworkView
         uri={track.artwork}
@@ -48,7 +43,10 @@ export function TrackItem({
       />
 
       <View style={styles.textContainer}>
-        <Text numberOfLines={1} style={styles.title}>
+        <Text
+          numberOfLines={1}
+          style={[styles.title, isActive ? styles.titleActive : null]}
+        >
           {track.title}
         </Text>
         <Text numberOfLines={1} style={styles.subtitle}>
@@ -56,40 +54,21 @@ export function TrackItem({
         </Text>
       </View>
 
-      <View style={styles.actions}>
-        {onMorePress ? (
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={() => onMorePress(track)}
-            hitSlop={8}
-            style={styles.moreButton}
-            accessibilityLabel="خيارات الأغنية"
-          >
-            <Ionicons
-              name="ellipsis-vertical"
-              size={18}
-              color={COLORS.textSecondary}
-            />
-          </TouchableOpacity>
-        ) : null}
-
+      {onMorePress ? (
         <TouchableOpacity
-          activeOpacity={0.8}
-          onPress={() => onTogglePlay(track)}
-          hitSlop={8}
-          style={[
-            styles.playButton,
-            showPause ? styles.playButtonActive : styles.playButtonInactive,
-          ]}
-          accessibilityLabel={showPause ? 'إيقاف مؤقت' : 'تشغيل'}
+          activeOpacity={0.7}
+          onPress={() => onMorePress(track)}
+          hitSlop={10}
+          style={styles.moreButton}
+          accessibilityLabel="خيارات الأغنية"
         >
           <Ionicons
-            name={showPause ? 'pause' : 'play'}
-            size={16}
-            color={showPause ? COLORS.iconOnAccent : COLORS.textPrimary}
+            name="ellipsis-vertical"
+            size={20}
+            color={COLORS.textSecondary}
           />
         </TouchableOpacity>
-      </View>
+      ) : null}
     </TouchableOpacity>
   );
 }
@@ -100,6 +79,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.sm + 2,
+  },
+  rowActive: {
+    backgroundColor: 'rgba(212, 238, 66, 0.06)',
   },
   textContainer: {
     flex: 1,
@@ -113,33 +95,18 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     marginBottom: 3,
   },
+  titleActive: {
+    color: COLORS.accent,
+  },
   subtitle: {
     fontSize: 12,
     color: COLORS.textSecondary,
     textAlign: 'right',
   },
-  actions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xs,
-  },
   moreButton: {
-    width: 30,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  playButton: {
     width: 36,
     height: 36,
-    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  playButtonActive: {
-    backgroundColor: COLORS.accent,
-  },
-  playButtonInactive: {
-    backgroundColor: COLORS.surface,
   },
 });

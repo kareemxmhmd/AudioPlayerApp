@@ -38,12 +38,14 @@ export function NowPlayingScreen() {
     position,
     duration,
     shuffle,
+    repeatMode,
     likedIds,
     togglePlayPause,
     skipToNext,
     skipToPrevious,
     seekTo,
     toggleShuffle,
+    toggleRepeatMode,
     toggleLike,
   } = useMusic();
 
@@ -278,6 +280,33 @@ export function NowPlayingScreen() {
 
           <TouchableOpacity
             activeOpacity={0.75}
+            onPress={toggleRepeatMode}
+            hitSlop={10}
+            style={styles.secondaryControl}
+            accessibilityLabel={
+              repeatMode === 'track'
+                ? 'إلغاء تكرار المقطع'
+                : 'تكرار المقطع مرة واحدة باستمرار'
+            }
+          >
+            <View style={styles.repeatWrap}>
+              <Ionicons
+                name="repeat"
+                size={23}
+                color={
+                  repeatMode === 'track' ? COLORS.accent : COLORS.textSecondary
+                }
+              />
+              {repeatMode === 'track' ? (
+                <View style={styles.repeatOneBadge}>
+                  <Text style={styles.repeatOneBadgeText}>1</Text>
+                </View>
+              ) : null}
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            activeOpacity={0.75}
             onPress={() => setPlaylistModalVisible(true)}
             hitSlop={10}
             style={styles.secondaryControl}
@@ -416,10 +445,33 @@ const styles = StyleSheet.create({
     marginTop: SPACING.sm,
   },
   secondaryControl: {
-    width: 44,
+    width: 40,
     height: 44,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  repeatWrap: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  repeatOneBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -5,
+    backgroundColor: COLORS.accent,
+    borderRadius: 6,
+    minWidth: 12,
+    height: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  repeatOneBadgeText: {
+    fontSize: 8,
+    fontWeight: '800',
+    color: COLORS.iconOnAccent,
+    lineHeight: 10,
   },
   mainPlayButton: {
     width: 64,

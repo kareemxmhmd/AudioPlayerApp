@@ -5,12 +5,16 @@ import TrackPlayer, {
   RepeatMode,
 } from 'react-native-track-player';
 import type { AddTrack } from 'react-native-track-player';
-import type { Track } from '../types/audio';
+import type { RepeatModeType, Track } from '../types/audio';
 
 let setupPromise: Promise<boolean> | null = null;
 let isSetupDone = false;
 
 export async function skipNextInPlayer(): Promise<void> {
+  const ready = await setupPlayer();
+  if (!ready) {
+    return;
+  }
   const queue = await TrackPlayer.getQueue();
   if (queue.length === 0) {
     return;
@@ -25,6 +29,10 @@ export async function skipNextInPlayer(): Promise<void> {
 }
 
 export async function skipPreviousInPlayer(): Promise<void> {
+  const ready = await setupPlayer();
+  if (!ready) {
+    return;
+  }
   const queue = await TrackPlayer.getQueue();
   if (queue.length === 0) {
     return;
@@ -122,6 +130,19 @@ export async function setupPlayer(): Promise<boolean> {
   })();
 
   return setupPromise;
+}
+
+export async function setPlayerRepeatMode(
+  mode: RepeatModeType,
+): Promise<void> {
+  const ready = await setupPlayer();
+  if (!ready) {
+    return;
+  }
+
+  await TrackPlayer.setRepeatMode(
+    mode === 'track' ? RepeatMode.Track : RepeatMode.Off,
+  );
 }
 
 export function toPlayerTrack(track: Track): AddTrack {

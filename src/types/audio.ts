@@ -21,3 +21,7 @@ export interface Playlist {
 export type TabType = 'all' | 'playlists' | 'liked';
 
 export type SortType = 'title' | 'date' | 'duration';
+
+export type RepeatModeType = 'off' | 'track';
+
+export type PlaybackMode = 'sequential' | 'shuffle' | 'repeat-one';
